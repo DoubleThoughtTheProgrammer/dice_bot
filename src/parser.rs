@@ -25,6 +25,8 @@ pub(crate) struct Error {
 pub(crate) fn do_dice_command(command: &str) -> Result<Number, Error> {
     let tokens = lex(command);
     let ast = parse(command, tokens)?;
+    #[cfg(test)]
+    println!("{ast:?}");
     Ok(ast.execute()?.as_number())
 }
 
@@ -206,6 +208,8 @@ impl Ast {
         let mut cache = vec![None; self.elements.len()];
         let mut stack = vec![root];
         loop {
+            assert!(stack.len() <= cache.len());
+
             let Some(&top) = stack.last() else {
                 #[cfg(test)]
                 println!("{cache:?}");
@@ -283,6 +287,7 @@ impl Ast {
                         }
                         Value::NumberList(roll(1, sides_f as usize))
                     },
+                    '(' => param.clone(),
                     _ => {
                         return Err(Error {
                             error_type: ErrorType::Internal,
@@ -603,10 +608,6 @@ impl AstBuilder {
 
         let mut steal_from_idx = self.ast.elements[left_idx].up;
         while let Some(steal_idx) = steal_from_idx {
-            let ElementData::BinaryOperator(_, ref mut operator_left, _) = operator else {
-                panic!("unreachable")
-            };
-            *operator_left = steal_idx;
             if self.can_steal_from(&self.ast.elements[steal_idx].data, &operator) {
                 break;
             }
@@ -622,17 +623,21 @@ impl AstBuilder {
             )
         });
 
-        let lower_idx = *down_point_ref;
+        let lower_idx = down_point_ref.unwrap();
+        let ElementData::BinaryOperator(_, ref mut operator_left, _) = operator else {
+            panic!("unreachable")
+        };
+        *operator_left = lower_idx;
         *down_point_ref = Some(add_idx);
 
-        let upper_idx = self.ast.elements[lower_idx.unwrap()].up;
+        let upper_idx = self.ast.elements[lower_idx].up;
 
         self.ast.elements.push(AstElement {
             position: err_index,
             up: upper_idx,
             data: operator,
         });
-        self.ast.elements[lower_idx.unwrap()].up = Some(add_idx);
+        self.ast.elements[lower_idx].up = Some(add_idx);
 
         Ok(())
     }
@@ -690,50 +695,13 @@ fn parse<'a>(source_string: &str, tokens: impl IntoIterator<Item = Token>) -> Re
     };
     for token in tokens {
         ast_builder.add_token(source_string, token)?;
+
+        #[cfg(test)]
+        println!("{ast_builder:#?}");
     }
 
     ast_builder.finalize()
 }
 
 #[cfg(test)]
-mod test {
-    use super::{Token, lex, parse};
-
-    #[test]
-    fn test_lex() {
-        let lexstr = "1d8 + -4";
-        let result: Vec<_> = lex(lexstr).collect();
-        assert_eq!(
-            result,
-            vec![
-                Token::Integer(0..1),
-                Token::Operator(1..2),
-                Token::Integer(2..3),
-                Token::Whitespace(3..4),
-                Token::Operator(4..5),
-                Token::Whitespace(5..6),
-                Token::Integer(6..8),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse() {
-        let parsestr = "1d8 + -4";
-        let tokens = lex(parsestr);
-        let ast = parse(parsestr, tokens).unwrap();
-        println!("{ast:#?}");
-    }
-
-    #[test]
-    fn test_exec() {
-        let parsestr = "1d8 + -4";
-        let tokens = lex(parsestr);
-        let ast = parse(parsestr, tokens).unwrap();
-        println!("{ast:#?}");
-        for _ in 0..10 {
-            let result = ast.execute();
-            println!("Rolled {result:?}");
-        }
-    }
-}
+mod test;
